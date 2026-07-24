@@ -17,6 +17,10 @@ export type OriginType =
   | 'fallen'          // 堕落术师血脉
   | 'cursed_hybrid'   // 半咒灵混血
   | 'orphan'          // 孤儿·被咒灵养大
+  | 'gojo_branch'     // 五条家旁系
+  | 'zenin_outcast'   // 禅院家弃子
+  | 'cursed_womb'     // 咒胎九相图
+  | 'star_plasma'     // 星浆体血脉
 
 /** 阵营 */
 export type Faction =
@@ -45,7 +49,10 @@ export type Attributes = Record<AttrKey, number>
 export type InjuryLevel = 'none' | 'light' | 'moderate' | 'heavy' | 'critical'
 
 /** 关系类型 */
-export type RelationType = 'ally' | 'rival' | 'mentor' | 'enemy' | 'friend' | 'family'
+export type RelationType = 'ally' | 'rival' | 'mentor' | 'enemy' | 'friend' | 'family' | 'lover'
+
+/** 性别 */
+export type Gender = 'male' | 'female'
 
 /** NPC角色 */
 export interface Character {
@@ -56,6 +63,8 @@ export interface Character {
   relation: RelationType
   affinity: number        // 好感度 -100 ~ 100
   appearedInPhase: Phase
+  romanceable?: boolean   // 是否可恋爱
+  preferGender?: Gender   // 角色偏好的玩家性别（恋爱门控）
 }
 
 /** 轮盘条目 */
@@ -77,6 +86,43 @@ export interface Choice {
   relationEffects?: { charId: string; delta: number }[]
   tags?: string[]            // 给状态打的标签
   nextEventId?: string       // 触发的后续事件
+  killChar?: string          // 该选择可能导致的角色死亡
+  deathChance?: number       // 该选择的玩家死亡概率
+  heal?: boolean             // 该选择是否治疗伤势（恢复至健康）
+  setLover?: string          // 该选择将某角色关系设为恋人（charId）
+}
+
+/** 战斗结果等级 */
+export type BattleOutcome = 'crush_win' | 'narrow_win' | 'draw' | 'narrow_loss' | 'crush_loss'
+
+/** 战斗配置（双方摇轮盘定输赢） */
+export interface BattleConfig {
+  enemyName: string
+  enemyIcon: string
+  enemyTitle: string
+  difficulty: number         // 敌方战力 0-100
+  rounds?: number            // 总回合数（多轮战斗，默认1）
+  intro: string              // 开战前的叙事
+  enemyCharId?: string       // 关联角色ID（胜利可将其击倒）
+  killEnemyOnWin?: boolean   // 大胜/险胜是否击杀敌人
+  rewards: {                 // 胜利奖励
+    attrs?: Partial<Attributes>
+    tags?: string[]
+  }
+  loseEffects: {             // 失败后果
+    attrs?: Partial<Attributes>
+    injury?: InjuryLevel
+    deathChance?: number
+    tags?: string[]
+  }
+  drawEffects?: {            // 平局后果
+    attrs?: Partial<Attributes>
+    injury?: InjuryLevel
+    tags?: string[]
+  }
+  winNarrative: string
+  loseNarrative: string
+  drawNarrative: string
 }
 
 /** 游戏事件 */
@@ -98,7 +144,14 @@ export interface GameEvent {
   excludeFaction?: Faction[] // 阵营排斥
   requireTechnique?: boolean // 需要已有术式
   requireNoTechnique?: boolean
-  choices: Choice[]
+  requireInjured?: boolean   // 需要处于受伤状态（治疗类事件门控）
+  requireMinInjury?: InjuryLevel  // 需要达到最低伤势等级
+  requireGender?: Gender     // 性别门控（恋爱事件）
+  requireMinAppearance?: number   // 最低相貌门控（1-5）
+  requireAffinity?: { charId: string; min: number }  // 需要某角色好感度达标
+  repeatable?: boolean       // 可重复触发（修炼/日常类事件，不进入已用列表）
+  choices?: Choice[]         // 可选项；留空则为纯叙事事件（无选择，直接继续）
+  battle?: BattleConfig      // 战斗事件配置（存在时进入对决轮盘）
   attrEffects?: Partial<Attributes>   // 事件本身的属性影响
   injury?: { level: InjuryLevel; chance: number }
   grantTags?: string[]       // 事件赋予的标签
@@ -165,6 +218,8 @@ export interface GameState {
   version: number
   gameId: string
   playerName: string
+  gender: Gender | null      // 性别
+  appearance: number         // 相貌 1-5（平凡~绝世）
   phase: Phase
   age: number
   turn: number
@@ -174,6 +229,7 @@ export interface GameState {
   domainUnlocked: boolean
   attributes: Attributes
   injury: InjuryLevel
+  injuryTurns: number        // 受伤持续的回合数（用于自动愈合）
   tags: string[]             // 状态标签（防矛盾的关键）
   characters: Character[]
   timeline: TimelineEntry[]

@@ -1,5 +1,5 @@
 import { GameState, ExportFormat } from '../types'
-import { PHASE_LABELS, ATTR_LABELS, INJURY_LABELS } from '../game/engine'
+import { PHASE_LABELS, ATTR_LABELS, INJURY_LABELS, GENDER_LABELS, APPEARANCE_LABELS } from '../game/engine'
 import { ORIGINS } from '../data/origins'
 
 const FACTION_NAMES: Record<string, string> = {
@@ -22,6 +22,8 @@ export function exportAsJSON(state: GameState): string {
     },
     player: {
       name: state.playerName,
+      gender: state.gender ? GENDER_LABELS[state.gender] : null,
+      appearance: state.appearance ? APPEARANCE_LABELS[state.appearance] : null,
       origin: origin ? { id: origin.id, label: origin.label } : null,
       faction: state.faction ? FACTION_NAMES[state.faction] : null,
       technique: state.technique ? {
@@ -70,6 +72,8 @@ export function exportAsMarkdown(state: GameState): string {
   lines.push(`| 项目 | 内容 |`)
   lines.push(`|------|------|`)
   lines.push(`| 姓名 | ${state.playerName} |`)
+  lines.push(`| 性别 | ${state.gender ? GENDER_LABELS[state.gender] : '未知'} |`)
+  lines.push(`| 相貌 | ${state.appearance ? `${APPEARANCE_LABELS[state.appearance]}（${'★'.repeat(state.appearance)}）` : '未知'} |`)
   lines.push(`| 出身 | ${origin ? `${origin.icon} ${origin.label}` : '未知'} |`)
   lines.push(`| 阵营 | ${state.faction ? FACTION_NAMES[state.faction] : '无'} |`)
   lines.push(`| 术式 | ${state.technique ? `${state.technique.icon} ${state.technique.name}` : '无'} |`)

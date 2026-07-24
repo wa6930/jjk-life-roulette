@@ -1,6 +1,6 @@
 import {
   GameState, GameEvent, Phase, Attributes, InjuryLevel,
-  TimelineEntry, Character, Technique,
+  TimelineEntry, Character, Technique, Choice, BattleOutcome,
 } from '../types'
 import { ALL_EVENTS } from '../data/events'
 import { ORIGINS } from '../data/origins'
@@ -42,12 +42,23 @@ export const ATTR_LABELS: Record<keyof Attributes, string> = {
   luck: '运气',
 }
 
+/** 相貌等级 */
+export const APPEARANCE_LABELS: Record<number, string> = {
+  1: '平凡', 2: '清秀', 3: '端正', 4: '出众', 5: '绝世',
+}
+
+export const GENDER_LABELS: Record<string, string> = {
+  male: '男', female: '女',
+}
+
 /** 创建新游戏状态 */
 export function createInitialState(playerName: string): GameState {
   return {
     version: 1,
     gameId: `jjk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     playerName,
+    gender: null,
+    appearance: 3,
     phase: 'origin',
     age: 0,
     turn: 0,
@@ -57,6 +68,7 @@ export function createInitialState(playerName: string): GameState {
     domainUnlocked: false,
     attributes: { cursedEnergy: 10, physical: 10, technique: 10, mental: 10, luck: 10 },
     injury: 'none',
+    injuryTurns: 0,
     tags: [],
     characters: [],
     timeline: [],
@@ -67,9 +79,138 @@ export function createInitialState(playerName: string): GameState {
     pendingWheel: null,
     spinCount: 0,
     maxSpinsPerPhase: {
-      origin: 1, childhood: 4, school: 4, career: 5, legend: 3, ending: 0,
+      origin: 1, childhood: 6, school: 6, career: 8, legend: 5, ending: 0,
     },
   }
+}
+
+// ============ 战斗系统 ============
+
+/** 对决轮盘片段（值越高越强） */
+export const BATTLE_SEGMENTS: { label: string; value: number; color: string }[] = [
+  { label: '破绽百出', value: 8, color: '#7f1d1d' },
+  { label: '咒力失误', value: 22, color: '#b91c1c' },
+  { label: '勉力招架', value: 38, color: '#d97706' },
+  { label: '稳扎稳打', value: 52, color: '#ca8a04' },
+  { label: '术式精妙', value: 66, color: '#16a34a' },
+  { label: '咒力全开', value: 80, color: '#0891b2' },
+  { label: '会心一击', value: 92, color: '#7c3aed' },
+  { label: '领域爆发', value: 100, color: '#db2777' },
+]
+
+const INJURY_POWER_PENALTY: Record<InjuryLevel, number> = {
+  none: 0, light: 6, moderate: 14, heavy: 24, critical: 38,
+}
+
+/** 计算玩家战力（0-100） */
+export function computePlayerPower(state: GameState): number {
+  const a = state.attributes
+  let power = a.cursedEnergy * 0.4 + a.technique * 0.3 + a.physical * 0.2 + a.luck * 0.1
+  power -= INJURY_POWER_PENALTY[state.injury]
+  if (state.domainUnlocked) power += 12
+  return Math.max(5, Math.min(100, Math.round(power)))
+}
+
+/** 根据战力生成轮盘权重（战力越高，高值片段概率越大） */
+export function battleWeights(power: number): number[] {
+  return BATTLE_SEGMENTS.map(s => Math.max(0.6, 12 - Math.abs(s.value - power) / 7))
+}
+
+/** 判定战斗结果 */
+export function determineBattleOutcome(playerRoll: number, enemyRoll: number): BattleOutcome {
+  const diff = playerRoll - enemyRoll
+  if (diff >= 20) return 'crush_win'
+  if (diff > 0) return 'narrow_win'
+  if (diff >= -15) return 'draw'
+  if (diff >= -35) return 'narrow_loss'
+  return 'crush_loss'
+}
+
+export const BATTLE_OUTCOME_LABELS: Record<BattleOutcome, string> = {
+  crush_win: '大胜',
+  narrow_win: '险胜',
+  draw: '两败俱伤',
+  narrow_loss: '险败',
+  crush_loss: '惨败',
+}
+
+/** 应用战斗结果 */
+export function applyBattle(
+  state: GameState,
+  event: GameEvent,
+  outcome: BattleOutcome
+): GameState {
+  const battle = event.battle!
+  let newState = { ...state }
+  const isWin = outcome === 'crush_win' || outcome === 'narrow_win'
+  const isDraw = outcome === 'draw'
+
+  // 属性与标签
+  if (isWin) {
+    if (battle.rewards.attrs) newState.attributes = applyAttrEffects(newState.attributes, battle.rewards.attrs)
+    if (battle.rewards.tags) newState.tags = [...new Set([...newState.tags, ...battle.rewards.tags])]
+    // 击杀敌人
+    if (battle.enemyCharId && battle.killEnemyOnWin) {
+      const target = newState.characters.find(c => c.id === battle.enemyCharId && c.alive)
+      if (target) {
+        newState.characters = newState.characters.map(c => c.id === battle.enemyCharId ? { ...c, alive: false } : c)
+        newState.timeline = [...newState.timeline, {
+          turn: newState.turn, age: newState.age, phase: newState.phase,
+          phaseLabel: PHASE_LABELS[newState.phase], eventType: 'char_death',
+          title: `击倒·${target.name}`,
+          description: `你在对决中击败了${target.name}（${target.title}）。`,
+          attrSnapshot: { ...newState.attributes }, wheelUsed: '对决轮盘',
+        }]
+      }
+    }
+  } else if (isDraw) {
+    if (battle.drawEffects?.attrs) newState.attributes = applyAttrEffects(newState.attributes, battle.drawEffects.attrs)
+    if (battle.drawEffects?.tags) newState.tags = [...new Set([...newState.tags, ...battle.drawEffects.tags])]
+    if (battle.drawEffects?.injury) { newState.injury = battle.drawEffects.injury; newState.injuryTurns = 0 }
+  } else {
+    if (battle.loseEffects.attrs) newState.attributes = applyAttrEffects(newState.attributes, battle.loseEffects.attrs)
+    if (battle.loseEffects.tags) newState.tags = [...new Set([...newState.tags, ...battle.loseEffects.tags])]
+    if (battle.loseEffects.injury) { newState.injury = battle.loseEffects.injury; newState.injuryTurns = 0 }
+    // 惨败有死亡风险
+    const deathChance = battle.loseEffects.deathChance || (outcome === 'crush_loss' ? 0.12 : 0)
+    if (deathChance && Math.random() < deathChance) {
+      newState.alive = false
+      newState.phase = 'ending'
+      newState.ending = resolveEnding(newState)
+    }
+  }
+
+  const narrative = isWin ? battle.winNarrative : isDraw ? battle.drawNarrative : battle.loseNarrative
+
+  newState.timeline = [...newState.timeline, {
+    turn: newState.turn, age: newState.age, phase: newState.phase,
+    phaseLabel: PHASE_LABELS[newState.phase], eventType: 'event',
+    title: `对决·${battle.enemyName}（${BATTLE_OUTCOME_LABELS[outcome]}）`,
+    description: narrative,
+    attrSnapshot: { ...newState.attributes }, wheelUsed: '对决轮盘',
+    chosenOption: BATTLE_OUTCOME_LABELS[outcome],
+  }]
+
+  if (!event.repeatable) newState.usedEventIds = [...newState.usedEventIds, event.id]
+  newState.currentEvent = null
+  newState.spinCount = state.spinCount + 1
+  newState.turn = state.turn + 1
+  newState.age = Math.min(state.age + Math.floor(Math.random() * 2) + 1, PHASE_AGE_RANGE[state.phase][1])
+
+  // 伤势自然恢复
+  if (newState.injury !== 'none') {
+    newState.injuryTurns = (state.injuryTurns || 0) + 1
+    if (newState.injuryTurns >= 3) {
+      const levels: InjuryLevel[] = ['none', 'light', 'moderate', 'heavy', 'critical']
+      const idx = levels.indexOf(newState.injury)
+      if (idx > 0) newState.injury = levels[idx - 1]
+      newState.injuryTurns = 0
+    }
+  } else {
+    newState.injuryTurns = 0
+  }
+
+  return newState
 }
 
 /** 加权随机选择 */
@@ -92,8 +233,8 @@ export function filterAvailableEvents(state: GameState): GameEvent[] {
     if (!evt.phases.includes(state.phase)) return false
     // 2. 年龄匹配
     if (state.age < evt.minAge || state.age > evt.maxAge) return false
-    // 3. 事件未使用过
-    if (state.usedEventIds.includes(evt.id)) return false
+    // 3. 事件未使用过（可重复事件除外）
+    if (!evt.repeatable && state.usedEventIds.includes(evt.id)) return false
     // 4. 标签需求
     if (evt.requireTags && evt.requireTags.length > 0 &&
         !evt.requireTags.some(t => state.tags.includes(t))) return false
@@ -108,6 +249,21 @@ export function filterAvailableEvents(state: GameState): GameEvent[] {
     // 8. 角色存活条件
     if (evt.requireChars && !evt.requireChars.some(c => isCharAlive(state, c))) return false
     if (evt.excludeChars && evt.excludeChars.some(c => isCharAlive(state, c))) return false
+    // 9. 伤势门控（治疗类事件只在受伤时出现）
+    if (evt.requireInjured && state.injury === 'none') return false
+    if (evt.requireMinInjury) {
+      const order: InjuryLevel[] = ['none', 'light', 'moderate', 'heavy', 'critical']
+      if (order.indexOf(state.injury) < order.indexOf(evt.requireMinInjury)) return false
+    }
+    // 10. 性别门控
+    if (evt.requireGender && state.gender !== evt.requireGender) return false
+    // 11. 相貌门控
+    if (evt.requireMinAppearance && state.appearance < evt.requireMinAppearance) return false
+    // 12. 好感度门控（恋爱事件）
+    if (evt.requireAffinity) {
+      const c = state.characters.find(ch => ch.id === evt.requireAffinity!.charId)
+      if (!c || !c.alive || c.affinity < evt.requireAffinity.min) return false
+    }
     return true
   })
 }
@@ -120,10 +276,21 @@ function isCharAlive(state: GameState, charId: string): boolean {
 /** 应用出身 */
 export function applyOrigin(state: GameState, originId: string): GameState {
   const origin = ORIGINS.find(o => o.id === originId)!
-  const chars = getInitialCharacters(originId).map(id => {
-    const base = CHARACTER_POOL.find(c => c.id === id)!
-    return { ...base, alive: true, affinity: 30, appearedInPhase: 'origin' as Phase }
-  })
+  const initIds = getInitialCharacters(originId)
+  // 开局同时引入幼年篇主角团，保证幼年事件能关联他们
+  const childhoodIds = PHASE_CHARACTER_POOL['childhood'] || []
+  const allIds = [...new Set([...initIds, ...childhoodIds])]
+  const chars = allIds.map(id => {
+    const base = CHARACTER_POOL.find(c => c.id === id)
+    if (!base) return null
+    const isInitial = initIds.includes(id)
+    return {
+      ...base,
+      alive: true,
+      affinity: isInitial ? 30 : Math.floor(Math.random() * 20),
+      appearedInPhase: 'origin' as Phase,
+    }
+  }).filter(Boolean) as Character[]
 
   const newState: GameState = {
     ...state,
@@ -267,13 +434,14 @@ export function advancePhase(state: GameState): GameState {
   return newState
 }
 
-/** 处理选择结果 */
+/** 处理选择结果（choiceId 为 '__continue__' 时表示纯叙事事件无选择） */
 export function applyChoice(
   state: GameState,
   event: GameEvent,
   choiceId: string
 ): GameState {
-  const choice = event.choices.find(c => c.id === choiceId)!
+  const choice: Choice = event.choices?.find(c => c.id === choiceId)
+    || { id: '__continue__', text: '继续', attrEffects: {}, narrative: '' }
   let newState = { ...state }
 
   // 1. 事件本身属性效果
@@ -282,6 +450,11 @@ export function applyChoice(
   }
   // 2. 选择属性效果
   newState.attributes = applyAttrEffects(newState.attributes, choice.attrEffects)
+
+  // 2.5 治疗（选择或事件可触发）
+  if (choice.heal && newState.injury !== 'none') {
+    newState.injury = 'none'
+  }
 
   // 3. 事件标签
   if (event.grantTags) {
@@ -297,6 +470,7 @@ export function applyChoice(
   const injuryRoll = event.injury || choice.injuryRisk
   if (injuryRoll && Math.random() < injuryRoll.chance) {
     newState.injury = injuryRoll.level
+    newState.injuryTurns = 0
     injuryNarrative = `你受到了${INJURY_LABELS[injuryRoll.level]}。`
     newState.timeline = [...newState.timeline, {
       turn: newState.turn, age: newState.age, phase: newState.phase,
@@ -317,12 +491,21 @@ export function applyChoice(
     })
   }
 
-  // 7. 角色死亡判定
-  if (event.killChar && Math.random() < (event.deathChance || 0.3)) {
-    const target = newState.characters.find(c => c.id === event.killChar && c.alive)
+  // 6.5 确立恋爱关系
+  if (choice.setLover) {
+    newState.characters = newState.characters.map(c =>
+      c.id === choice.setLover ? { ...c, relation: 'lover' as const, affinity: 100 } : c
+    )
+  }
+
+  // 7. 角色死亡判定（事件级或选择级）
+  const killTarget = choice.killChar || event.killChar
+  const deathChance = choice.deathChance ?? event.deathChance
+  if (killTarget && Math.random() < (deathChance || 0.3)) {
+    const target = newState.characters.find(c => c.id === killTarget && c.alive)
     if (target) {
       newState.characters = newState.characters.map(c =>
-        c.id === event.killChar ? { ...c, alive: false } : c
+        c.id === killTarget ? { ...c, alive: false } : c
       )
       newState.timeline = [...newState.timeline, {
         turn: newState.turn, age: newState.age, phase: newState.phase,
@@ -337,7 +520,7 @@ export function applyChoice(
   }
 
   // 8. 玩家死亡判定
-  if (event.deathChance && Math.random() < event.deathChance * 0.5) {
+  if (deathChance && Math.random() < deathChance * 0.5) {
     newState.alive = false
     newState.phase = 'ending'
     newState.ending = resolveEnding(newState)
@@ -375,7 +558,7 @@ export function applyChoice(
   }
 
   // 11. 推进
-  newState.usedEventIds = [...newState.usedEventIds, event.id]
+  if (!event.repeatable) newState.usedEventIds = [...newState.usedEventIds, event.id]
   newState.currentEvent = null
   newState.spinCount = state.spinCount + 1
   newState.turn = state.turn + 1
@@ -384,11 +567,17 @@ export function applyChoice(
     PHASE_AGE_RANGE[state.phase][1]
   )
 
-  // 伤势自然恢复
-  if (newState.injury !== 'none' && Math.random() > 0.6) {
-    const levels: InjuryLevel[] = ['none', 'light', 'moderate', 'heavy', 'critical']
-    const idx = levels.indexOf(newState.injury)
-    if (idx > 0) newState.injury = levels[idx - 1]
+  // 伤势自然恢复：连续几个回合未加重则逐步愈合
+  if (newState.injury !== 'none') {
+    newState.injuryTurns = (state.injuryTurns || 0) + 1
+    if (newState.injuryTurns >= 3) {
+      const levels: InjuryLevel[] = ['none', 'light', 'moderate', 'heavy', 'critical']
+      const idx = levels.indexOf(newState.injury)
+      if (idx > 0) newState.injury = levels[idx - 1]
+      newState.injuryTurns = 0
+    }
+  } else {
+    newState.injuryTurns = 0
   }
 
   return newState
