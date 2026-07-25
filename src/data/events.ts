@@ -1,4 +1,5 @@
 import { GameEvent } from '../types'
+import { originFollowupEvents, factionBattleEvents, affinityEvents, extraRandomEvents } from './eventsExtra'
 
 // ============ 幼年篇事件 (0-15岁) ============
 const childhoodEvents: GameEvent[] = [
@@ -1007,4 +1008,8 @@ export const ALL_EVENTS: GameEvent[] = [
   ...romanceEvents,
   ...continuityEvents,
   ...trainingEvents,
+  ...originFollowupEvents,
+  ...factionBattleEvents,
+  ...affinityEvents,
+  ...extraRandomEvents,
 ]

@@ -1091,6 +1091,71 @@ body {
 .outcome-label { font-size: 24px; font-weight: 900; letter-spacing: 4px; }
 .battle-actions { display: flex; justify-content: center; }
 .btn-battle { min-width: 200px; }
+
+/* 生命条 */
+.hp-bars { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.hp-row { display: flex; align-items: center; gap: 8px; }
+.hp-name { font-size: 12px; font-weight: 700; width: 44px; text-align: right; }
+.hp-name.you { color: #c4b5fd; }
+.hp-name.enemy { color: #fda4af; }
+.hp-track {
+  flex: 1;
+  height: 14px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 7px;
+  overflow: hidden;
+}
+.hp-fill { height: 100%; border-radius: 7px; transition: width 0.5s ease; }
+.hp-fill.you { background: linear-gradient(90deg, #16a34a, #4ade80); }
+.hp-fill.enemy { background: linear-gradient(90deg, #be123c, #f43f5e); }
+.hp-num { font-size: 11px; color: var(--text-secondary); width: 56px; }
+
+/* 招式选择 */
+.move-select { margin: 8px 0; }
+.move-select-label { text-align: center; font-size: 13px; color: #c4b5fd; margin-bottom: 10px; }
+.move-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.move-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(139, 92, 246, 0.06);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: left;
+  font-family: inherit;
+}
+.move-btn:active { transform: scale(0.96); border-color: var(--purple); background: rgba(139, 92, 246, 0.18); }
+.move-icon { font-size: 18px; }
+.move-name { font-size: 13px; font-weight: 700; }
+.move-meta { font-size: 10px; color: var(--text-dim); }
+
+.spin-progress {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--gold);
+  margin-top: 4px;
+  animation: pulse 1s infinite;
+}
+.battle-status { text-align: center; margin: 12px 0; }
+.status-pulse { font-size: 14px; color: var(--gold); animation: pulse 1s infinite; }
+
+.round-summary {
+  background: rgba(0,0,0,0.25);
+  border-radius: 12px;
+  padding: 12px;
+  margin: 8px 0;
+  text-align: center;
+}
+.summary-line { font-size: 13px; margin: 4px 0; color: var(--text-secondary); }
+.summary-line b { font-size: 15px; }
+.you-line b { color: #4ade80; }
+.enemy-line b { color: #f87171; }
+.heal-line b { color: #6ee7b7; }
 .choice-continue { width: 100%; margin-top: 4px; }
 
 /* ============ 滚动条 ============ */

@@ -172,6 +172,18 @@ export interface Origin {
   color: string
 }
 
+/** 战斗招式 */
+export interface BattleMove {
+  id: string
+  name: string
+  icon: string
+  spins: number          // 转盘次数（连击数）
+  bonus: number          // 招式威力加成
+  desc: string
+  guard?: number         // 本回合减伤比例 0-1（防御类招式）
+  heal?: number          // 本回合回复生命（治疗类招式）
+}
+
 /** 术式定义 */
 export interface Technique {
   id: string
@@ -180,6 +192,7 @@ export interface Technique {
   category: TechniqueCategory
   description: string
   domainName?: string        // 领域展开名
+  move?: BattleMove          // 术式签名招式（战斗中使用）
   attrBonus: Partial<Attributes>
   grantTags: string[]
   minPhase: Phase

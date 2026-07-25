@@ -1,12 +1,13 @@
 import {
   GameState, GameEvent, Phase, Attributes, InjuryLevel,
-  TimelineEntry, Character, Technique, Choice, BattleOutcome,
+  TimelineEntry, Character, Technique, Choice, BattleOutcome, BattleMove,
 } from '../types'
 import { ALL_EVENTS } from '../data/events'
 import { ORIGINS } from '../data/origins'
 import { TECHNIQUES } from '../data/techniques'
 import { resolveEnding } from '../data/endings'
 import { CHARACTER_POOL, getInitialCharacters, PHASE_CHARACTER_POOL } from '../data/characters'
+import { GENERIC_MOVES, TECHNIQUE_MOVES } from '../data/moves'
 
 export const PHASE_LABELS: Record<Phase, string> = {
   origin: '转生',
@@ -132,6 +133,46 @@ export const BATTLE_OUTCOME_LABELS: Record<BattleOutcome, string> = {
   draw: '两败俱伤',
   narrow_loss: '险败',
   crush_loss: '惨败',
+}
+
+/** 玩家可用招式：通用招式 + 术式签名招式 */
+export function getPlayerMoves(state: GameState): BattleMove[] {
+  const moves = [...GENERIC_MOVES]
+  if (state.technique && TECHNIQUE_MOVES[state.technique.id]) {
+    moves.push(TECHNIQUE_MOVES[state.technique.id])
+  }
+  // 领域解锁后，签名招式强化（多一次转盘）
+  if (state.domainUnlocked && state.technique && TECHNIQUE_MOVES[state.technique.id]) {
+    const base = TECHNIQUE_MOVES[state.technique.id]
+    moves[moves.length - 1] = { ...base, name: base.name + '·极', spins: base.spins + 1, bonus: base.bonus + 12 }
+  }
+  return moves
+}
+
+/** 根据难度生成敌方招式 */
+export function getEnemyMoves(difficulty: number): BattleMove[] {
+  const scale = difficulty / 100
+  return [
+    { id: 'e_basic', name: '撞击', icon: '👊', spins: 1, bonus: Math.round(6 * scale), desc: '' },
+    { id: 'e_flurry', name: '连击', icon: '🥊', spins: 2, bonus: Math.round(10 * scale), desc: '' },
+    { id: 'e_heavy', name: '重击', icon: '💥', spins: 1, bonus: Math.round(28 * scale), desc: '' },
+  ]
+}
+
+/** 玩家最大生命 */
+export function computePlayerMaxHP(state: GameState): number {
+  return 90 + Math.round(state.attributes.physical * 0.7 + state.attributes.cursedEnergy * 0.3)
+}
+
+/** 敌方最大生命 */
+export function computeEnemyMaxHP(difficulty: number): number {
+  return Math.round(70 + difficulty * 1.1)
+}
+
+/** 计算一次招式的总伤害：各次转盘值之和 × 系数 + 招式加成 */
+export function computeMoveDamage(spinValues: number[], move: BattleMove): number {
+  const sum = spinValues.reduce((a, b) => a + b, 0)
+  return Math.round(sum * 0.32 + move.bonus)
 }
 
 /** 应用战斗结果 */
@@ -354,7 +395,14 @@ export function applyAttrEffects(attrs: Attributes, effects: Partial<Attributes>
   const result = { ...attrs }
   for (const [key, val] of Object.entries(effects)) {
     const k = key as keyof Attributes
-    result[k] = Math.max(0, Math.min(100, result[k] + (val || 0)))
+    let gain = val || 0
+    // 递减收益：属性越高，正向增长越慢，防止数值轻易堆满
+    if (gain > 0) {
+      if (result[k] >= 88) gain = Math.ceil(gain * 0.2)
+      else if (result[k] >= 75) gain = Math.ceil(gain * 0.45)
+      else if (result[k] >= 60) gain = Math.ceil(gain * 0.7)
+    }
+    result[k] = Math.max(0, Math.min(100, result[k] + gain))
   }
   return result
 }
